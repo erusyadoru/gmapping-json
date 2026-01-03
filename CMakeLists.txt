@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# OpenMP support
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+  message(STATUS "OpenMP found: ${OpenMP_CXX_VERSION}")
+else()
+  message(WARNING "OpenMP not found, parallel processing disabled")
+endif()
+
 # Build type
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -157,6 +165,11 @@ target_link_libraries(gmapping_gridfastslam
   gmapping_sensor_base
   gmapping_utils
 )
+# Add OpenMP support for parallel scan matching
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(gmapping_gridfastslam OpenMP::OpenMP_CXX)
+  target_compile_definitions(gmapping_gridfastslam PUBLIC USE_OPENMP)
+endif()
 generate_export_header(gmapping_gridfastslam
   EXPORT_FILE_NAME ${EXPORT_HEADER_DIR}/gmapping/gridfastslam/gridfastslam_export.h
   BASE_NAME gridfastslam)
