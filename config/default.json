@@ -9,7 +9,7 @@
   },
   "particle_filter": {
     "particles": 30,
-    "resample_threshold": 0.9,
+    "resample_threshold": 0.5,
     "single_map_mode": false
   },
   "motion_model": {
