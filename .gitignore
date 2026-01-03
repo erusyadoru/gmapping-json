@@ -1,0 +1,16 @@
+# Build files
+build/
+
+# Large files
+*.bag
+*.pgm
+*.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary
+*.swp
+*.swo
+*~
