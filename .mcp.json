@@ -1,0 +1,37 @@
+{
+  "mcpServers": {
+    "serena": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/oraios/serena",
+        "serena", "start-mcp-server",
+        "--context", "claude-code",
+        "--project", "/home/industryalpha/gmapping-json"
+      ]
+    },
+    "ros-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory", "/home/industryalpha/ros-mcp-server",
+        "run", "python", "server.py", "--transport=stdio"
+      ]
+    },
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/industryalpha/gmapping-json"]
+    },
+    "git": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git"]
+    },
+    "docker": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/QuantGeekDev/docker-mcp", "docker-mcp"]
+    }
+  }
+}

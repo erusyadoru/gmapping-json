@@ -1,0 +1,26 @@
+<launch>
+  <!-- Arguments -->
+  <arg name="map_file" doc="Path to map yaml file"/>
+  <arg name="input_bag" doc="Path to input rosbag file"/>
+  <arg name="output_bag" default="out.bag" doc="Output bag filename"/>
+
+  <!-- Record all topics -->
+  <node pkg="rosbag" type="record" name="rosbag_record"
+        args="-a -O $(arg output_bag)"
+        output="screen"/>
+
+  <!-- Map server to publish the map -->
+  <node pkg="map_server" type="map_server" name="map_server"
+        args="$(arg map_file)"
+        output="screen">
+    <param name="frame_id" value="map"/>
+  </node>
+
+  <!-- Play input rosbag - required=true means launch exits when this finishes -->
+  <!-- launch-prefix adds delay to ensure rosbag record is ready -->
+  <node pkg="rosbag" type="play" name="rosbag_play"
+        args="$(arg input_bag) --clock -d 3 -r 5"
+        required="true"
+        output="screen"/>
+
+</launch>

@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # rosbridge_server (ROS環境)
+  rosbridge:
+    build:
+      context: ./rosbridge_server
+    container_name: rosbridge
+    network_mode: host
+    environment:
+      - ROS_MASTER_URI=http://localhost:11311
+    volumes:
+      - ${BAG_DIR:-/home/industryalpha/gmapping-json}:/data:ro
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',9091)); s.close()\""]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # rosbridge → UDP リレー
+  relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rosbridge-relay
+    network_mode: host
+    depends_on:
+      rosbridge:
+        condition: service_healthy
+    command:
+      - --rosbridge
+      - ws://localhost:9091
+      - --udp-host
+      - 127.0.0.1
+      - --udp-port
+      - "9090"
+      - --topics
+      - /wr_scan_rear
+      - /odom
+      - --throttle
+      - "10"
+    restart: on-failure

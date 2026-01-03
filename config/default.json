@@ -1,0 +1,45 @@
+{
+  "server": {
+    "port": 9090,
+    "web_port": 8080
+  },
+  "map": {
+    "size": 20,
+    "resolution": 0.01
+  },
+  "particle_filter": {
+    "particles": 30,
+    "resample_threshold": 0.9,
+    "single_map_mode": false
+  },
+  "motion_model": {
+    "srr": 0.1,
+    "srt": 0.2,
+    "str": 0.1,
+    "stt": 0.2
+  },
+  "scan_matcher": {
+    "max_range": 5.0,
+    "max_urange": 5.0,
+    "sigma": 0.05,
+    "kernel_size": 0,
+    "lstep": 0.05,
+    "astep": 0.05,
+    "iterations": 3,
+    "lsigma": 0.075,
+    "lskip": 19
+  },
+  "update": {
+    "linear": 0.2,
+    "angular": 0.2
+  },
+  "laser": {
+    "x": -0.37,
+    "y": 0.0,
+    "theta": 3.14159
+  },
+  "output": {
+    "map_path": "map.pgm",
+    "save_interval": 5.0
+  }
+}
