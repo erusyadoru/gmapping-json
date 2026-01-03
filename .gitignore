@@ -5,6 +5,7 @@ build/
 *.bag
 *.pgm
 *.yaml
+*.png
 
 # IDE
 .vscode/
