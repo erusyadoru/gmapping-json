@@ -6,6 +6,7 @@
 #include <atomic>
 #include <mutex>
 #include <functional>
+#include <cmath>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -135,7 +136,13 @@ private:
         json << ",\"ranges\":[";
         for (size_t i = 0; i < state_.scan_ranges.size(); i += 10) { // Downsample
             if (i > 0) json << ",";
-            json << state_.scan_ranges[i];
+            float r = state_.scan_ranges[i];
+            // Output null for infinity/nan values (not valid JSON)
+            if (std::isfinite(r)) {
+                json << r;
+            } else {
+                json << "null";
+            }
         }
         json << "]},";
 

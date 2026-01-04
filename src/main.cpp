@@ -46,6 +46,7 @@ static bool g_timing_debug = false;
 #include "rosbridge_types.h"
 #include "gmapping_wrapper.h"
 #include "udp_server.h"
+#include "websocket_client.h"
 #include "web_server.h"
 #include "rosbag_writer.h"
 
@@ -232,6 +233,12 @@ public:
 
 private:
     void processPublish(const rosbridge::RosbridgeMessage& msg) {
+        static int topic_debug_count = 0;
+        if (topic_debug_count < 10) {
+            std::cout << "[Topic] Received: " << msg.topic << std::endl;
+            topic_debug_count++;
+        }
+
         if (msg.topic == "/scan" || msg.topic == "scan" ||
             msg.topic.find("scan") != std::string::npos) {
             processScan(msg.msg);
@@ -426,16 +433,25 @@ void printUsage(const char* prog) {
               << "  --save-config FILE       Save current configuration to JSON file and exit\n"
               << "  --timing-debug           Enable detailed timing output for debugging\n"
               << "  --single-map             Use single map mode (faster, best particle only)\n"
+              << "\nWebSocket mode (connect to rosbridge directly):\n"
+              << "  --ws URL                 Connect to rosbridge WebSocket (e.g., ws://localhost:9091)\n"
+              << "  --scan-topic TOPIC       Scan topic name (default: /scan)\n"
+              << "  --odom-topic TOPIC       Odom topic name (default: /odom)\n"
               << "  -h, --help               Show this help message\n"
-              << "\nExample:\n"
+              << "\nExamples:\n"
               << "  " << prog << " -p 9090 -o mymap.pgm --laser-x -0.37 --laser-theta 3.14159\n"
+              << "  " << prog << " --ws ws://192.168.1.1:9091 --scan-topic /wr_scan_rear\n"
               << std::endl;
 }
 
 int main(int argc, char* argv[]) {
     // Default configuration
-    int port = 9090;
+    int udp_port = 9090;
     int web_port = 8080;
+    std::string server_mode = "udp";  // "udp" or "websocket"
+    std::string rosbridge_url = "ws://localhost:9091";
+    std::string scan_topic = "/scan";
+    std::string odom_topic = "/odom";
     GmappingWrapper::Config config;
 
     // First pass: check for config file option
@@ -451,8 +467,16 @@ int main(int argc, char* argv[]) {
                     file >> j;
                     if (j.contains("server")) {
                         auto& s = j["server"];
-                        if (s.contains("port")) port = s["port"].get<int>();
+                        if (s.contains("mode")) server_mode = s["mode"].get<std::string>();
+                        if (s.contains("udp_port")) udp_port = s["udp_port"].get<int>();
+                        if (s.contains("port")) udp_port = s["port"].get<int>();  // backward compat
                         if (s.contains("web_port")) web_port = s["web_port"].get<int>();
+                    }
+                    if (j.contains("rosbridge")) {
+                        auto& rb = j["rosbridge"];
+                        if (rb.contains("url")) rosbridge_url = rb["url"].get<std::string>();
+                        if (rb.contains("scan_topic")) scan_topic = rb["scan_topic"].get<std::string>();
+                        if (rb.contains("odom_topic")) odom_topic = rb["odom_topic"].get<std::string>();
                     }
                 }
             } catch (const std::exception& e) {
@@ -490,6 +514,9 @@ int main(int argc, char* argv[]) {
         {"save-config",    required_argument, 0, 0},
         {"timing-debug",   no_argument,       0, 0},
         {"single-map",     no_argument,       0, 0},
+        {"ws",             required_argument, 0, 0},  // WebSocket URL
+        {"scan-topic",     required_argument, 0, 0},
+        {"odom-topic",     required_argument, 0, 0},
         {"help",           no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
@@ -552,6 +579,13 @@ int main(int argc, char* argv[]) {
                     g_timing_debug = true;
                 } else if (name == "single-map") {
                     config.singleMapMode = true;
+                } else if (name == "ws") {
+                    server_mode = "websocket";
+                    rosbridge_url = optarg;
+                } else if (name == "scan-topic") {
+                    scan_topic = optarg;
+                } else if (name == "odom-topic") {
+                    odom_topic = optarg;
                 }
                 break;
             }
@@ -559,7 +593,7 @@ int main(int argc, char* argv[]) {
                 config_path = optarg;
                 break;
             case 'p':
-                port = std::stoi(optarg);
+                udp_port = std::stoi(optarg);
                 break;
             case 'o':
                 config.mapOutputPath = optarg;
@@ -592,8 +626,15 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
 
-    std::cout << "=== GMapping JSON UDP Server ===" << std::endl;
-    std::cout << "Port: " << port << std::endl;
+    std::cout << "=== GMapping JSON Server ===" << std::endl;
+    std::cout << "Mode: " << server_mode << std::endl;
+    if (server_mode == "websocket") {
+        std::cout << "Rosbridge URL: " << rosbridge_url << std::endl;
+        std::cout << "Scan topic: " << scan_topic << std::endl;
+        std::cout << "Odom topic: " << odom_topic << std::endl;
+    } else {
+        std::cout << "UDP Port: " << udp_port << std::endl;
+    }
     std::cout << "Output: " << config.mapOutputPath << std::endl;
     std::cout << "Resolution: " << config.resolution << " m/cell" << std::endl;
     std::cout << "Map size: [" << config.xmin << ", " << config.ymin
@@ -630,28 +671,70 @@ int main(int argc, char* argv[]) {
     // Create message queue for decoupling receive from processing
     MessageQueue messageQueue;
 
-    // Create and start UDP server
-    UdpServer server(port);
+    // Server instances (only one will be used)
+    std::unique_ptr<UdpServer> udpServer;
+    std::unique_ptr<WebSocketClient> wsClient;
+    std::thread receiveThread;
 
-    if (!server.start()) {
-        return 1;
-    }
+    if (server_mode == "websocket") {
+        // WebSocket mode - connect to rosbridge
+        wsClient = std::make_unique<WebSocketClient>();
 
-    std::cout << "Waiting for rosbridge messages..." << std::endl;
-    std::cout << "Expected topics: /scan (sensor_msgs/LaserScan), /odom (nav_msgs/Odometry)" << std::endl;
-    std::cout << "Press Ctrl+C to save map and exit" << std::endl;
-    std::cout << std::endl;
-
-    // Start receive thread - fast, just receives and queues
-    std::thread receiveThread([&server, &messageQueue]() {
-        std::string data;
-        std::string sender;
-        while (!g_shutdown && server.isRunning()) {
-            if (server.receive(data, sender)) {
-                messageQueue.push(data);
-            }
+        if (!wsClient->connect(rosbridge_url)) {
+            std::cerr << "[Main] Failed to connect to rosbridge: " << rosbridge_url << std::endl;
+            return 1;
         }
-    });
+
+        // Subscribe to topics
+        std::cout << "[Main] Subscribing to scan: " << scan_topic << std::endl;
+        bool scan_ok = wsClient->subscribe(scan_topic, "sensor_msgs/LaserScan");
+        std::cout << "[Main] Scan subscribe result: " << (scan_ok ? "OK" : "FAILED") << std::endl;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));  // Delay between subscriptions
+
+        std::cout << "[Main] Subscribing to odom: " << odom_topic << std::endl;
+        bool odom_ok = wsClient->subscribe(odom_topic, "nav_msgs/Odometry");
+        std::cout << "[Main] Odom subscribe result: " << (odom_ok ? "OK" : "FAILED") << std::endl;
+
+        std::cout << "Connected to rosbridge, waiting for messages..." << std::endl;
+        std::cout << "Press Ctrl+C to save map and exit" << std::endl;
+        std::cout << std::endl;
+
+        // Start receive thread for WebSocket
+        receiveThread = std::thread([&wsClient, &messageQueue]() {
+            wsClient->startAsync([&messageQueue](const std::string& data) {
+                messageQueue.push(data);
+            });
+            // Wait until shutdown
+            while (!g_shutdown && wsClient->isConnected()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
+
+    } else {
+        // UDP mode (default)
+        udpServer = std::make_unique<UdpServer>(udp_port);
+
+        if (!udpServer->start()) {
+            return 1;
+        }
+
+        std::cout << "Waiting for rosbridge messages via UDP..." << std::endl;
+        std::cout << "Expected topics: /scan (sensor_msgs/LaserScan), /odom (nav_msgs/Odometry)" << std::endl;
+        std::cout << "Press Ctrl+C to save map and exit" << std::endl;
+        std::cout << std::endl;
+
+        // Start receive thread for UDP
+        receiveThread = std::thread([&udpServer, &messageQueue]() {
+            std::string data;
+            std::string sender;
+            while (!g_shutdown && udpServer->isRunning()) {
+                if (udpServer->receive(data, sender)) {
+                    messageQueue.push(data);
+                }
+            }
+        });
+    }
 
     // Main processing loop - slower, but doesn't block receiving
     std::string data;
@@ -769,7 +852,13 @@ int main(int argc, char* argv[]) {
 
     messageQueue.printStats();
 
-    server.stop();
+    // Stop the appropriate server/client
+    if (wsClient) {
+        wsClient->stop();
+    }
+    if (udpServer) {
+        udpServer->stop();
+    }
     webServer.stop();
     receiveThread.join();
     std::cout << "[Main] Shutdown complete" << std::endl;

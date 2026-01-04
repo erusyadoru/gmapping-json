@@ -1,7 +1,13 @@
 {
   "server": {
-    "port": 9090,
+    "mode": "udp",
+    "udp_port": 9090,
     "web_port": 8080
+  },
+  "rosbridge": {
+    "url": "ws://localhost:9091",
+    "scan_topic": "/scan",
+    "odom_topic": "/odom"
   },
   "map": {
     "size": 20,

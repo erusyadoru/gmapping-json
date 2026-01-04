@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <limits>
 #include "json.hpp"
 
 using json = nlohmann::json;
@@ -104,6 +105,23 @@ inline bool has_value(const json& j, const std::string& key) {
     return j.contains(key) && !j[key].is_null();
 }
 
+// Helper to parse float array with null handling (null -> infinity)
+inline std::vector<float> parse_float_array(const json& j) {
+    std::vector<float> result;
+    if (!j.is_array()) return result;
+    result.reserve(j.size());
+    for (const auto& val : j) {
+        if (val.is_null()) {
+            result.push_back(std::numeric_limits<float>::infinity());
+        } else if (val.is_number()) {
+            result.push_back(val.get<float>());
+        } else {
+            result.push_back(std::numeric_limits<float>::infinity());
+        }
+    }
+    return result;
+}
+
 // JSON parsing functions
 inline void from_json(const json& j, Header::Stamp& s) {
     // Support both ROS1 (secs/nsecs) and ROS2 (sec/nanosec) formats
@@ -161,8 +179,13 @@ inline void from_json(const json& j, LaserScan& scan) {
     if (has_value(j, "scan_time")) scan.scan_time = j["scan_time"].get<float>();
     if (has_value(j, "range_min")) scan.range_min = j["range_min"].get<float>();
     if (has_value(j, "range_max")) scan.range_max = j["range_max"].get<float>();
-    if (has_value(j, "ranges")) scan.ranges = j["ranges"].get<std::vector<float>>();
-    if (has_value(j, "intensities")) scan.intensities = j["intensities"].get<std::vector<float>>();
+    // Use custom parser for arrays that may contain null values
+    if (j.contains("ranges") && j["ranges"].is_array()) {
+        scan.ranges = parse_float_array(j["ranges"]);
+    }
+    if (j.contains("intensities") && j["intensities"].is_array()) {
+        scan.intensities = parse_float_array(j["intensities"]);
+    }
 }
 
 inline void from_json(const json& j, Odometry& odom) {
